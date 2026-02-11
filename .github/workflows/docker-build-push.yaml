@@ -1,12 +1,13 @@
-name: Build and Push Master and Slave Docker Images
+name: Build and Push Jenkins Images
 
 on:
   push:
     branches:
+      - main
       - master
 
 jobs:
-  build-and-push-master-and-slave:
+  build-and-push-jenkins-images:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,20 +22,42 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      # Step 3: Build Docker Image for 'master' using the correct Dockerfile and context
-      - name: Build Master Image
+      # Step 3: Determine Docker contexts dynamically
+      - name: Determine Dockerfile contexts
+        id: contexts
         run: |
-          docker build -f docker/alpine/hotspot/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest docker/alpine/hotspot/
+          # Detect master/controller Dockerfile context
+          if [ -d "docker/alpine/hotspot" ]; then
+            echo "master_context=docker/alpine/hotspot" >> $GITHUB_OUTPUT
+          elif [ -d "jenkins-master/alpine/hotspot" ]; then
+            echo "master_context=jenkins-master/alpine/hotspot" >> $GITHUB_OUTPUT
+          else
+            echo "master_context=" >> $GITHUB_OUTPUT
+          fi
 
-      # Step 4: Push Master Docker Image to DockerHub
-      - name: Push Master Image
-        run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest
+          # Detect agent/slave Dockerfile context
+          if [ -d "docker-agents/alpine" ]; then
+            echo "agent_context=docker-agents/alpine" >> $GITHUB_OUTPUT
+          elif [ -d "jenkins-agent/alpine" ]; then
+            echo "agent_context=jenkins-agent/alpine" >> $GITHUB_OUTPUT
+          else
+            echo "agent_context=" >> $GITHUB_OUTPUT
+          fi
 
-      # Step 5: Build Docker Image for 'slave' using the correct Dockerfile and context
-      - name: Build Slave Image
+      # Step 4: Build and push 'master' (controller) image
+      - name: Build & Push Master Image
+        if: steps.contexts.outputs.master_context != ''
         run: |
-          docker build -f docker-agents/alpine/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest docker-agents/
+          docker build -f ${{ steps.contexts.outputs.master_context }}/Dockerfile \
+            -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest \
+            ${{ steps.contexts.outputs.master_context }}
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest
 
-      # Step 6: Push Slave Docker Image to DockerHub
-      - name: Push Slave Image
-        run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest
+      # Step 5: Build and push 'slave' (agent) image
+      - name: Build & Push Slave Image
+        if: steps.contexts.outputs.agent_context != ''
+        run: |
+          docker build -f ${{ steps.contexts.outputs.agent_context }}/Dockerfile \
+            -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest \
+            ${{ steps.contexts.outputs.agent_context }}
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest
