@@ -21,19 +21,19 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      # Step 3: Build Docker Image for 'master' using the custom Dockerfile
+      # Step 3: Build Docker Image for 'master' using the correct Dockerfile and context
       - name: Build Master Image
         run: |
-          docker build -f ../docker/alpine/hotspot/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest docker/alpine/hotspot/
+          docker build -f docker/alpine/hotspot/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest docker/alpine/hotspot/
 
       # Step 4: Push Master Docker Image to DockerHub
       - name: Push Master Image
         run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:latest
 
-      # Step 5: Build Docker Image for 'slave'
+      # Step 5: Build Docker Image for 'slave' using the correct Dockerfile and context
       - name: Build Slave Image
         run: |
-          docker build -f ../docker-agents/alpine/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest docker-agents/
+          docker build -f docker-agents/alpine/Dockerfile -t ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:latest docker-agents/
 
       # Step 6: Push Slave Docker Image to DockerHub
       - name: Push Slave Image
