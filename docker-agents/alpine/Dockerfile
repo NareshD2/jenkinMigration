@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 # The MIT License
 #
 #  Copyright (c) 2015-2020, CloudBees, Inc. and other Jenkins contributors
@@ -19,7 +21,12 @@
 #  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 #  THE SOFTWARE.
+
 ARG ALPINE_TAG=3.23.3
+
+# --------------------------------
+# Stage: jre-build
+# --------------------------------
 FROM alpine:"${ALPINE_TAG}" AS jre-build
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -28,27 +35,30 @@ SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 # Ref. https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETPLATFORM
 
-COPY adoptium-get-jdk-link.sh /usr/bin/local/adoptium-get-jdk-link.sh
-COPY adoptium-install-jdk.sh /usr/bin/local/adoptium-install-jdk.sh
+# Copy helper scripts from repo to image and make them executable
+# NOTE: fixed path to /usr/local/bin (not /usr/bin/local)
+COPY --chmod=0755 docker-agents/adoptium-get-jdk-link.sh   /usr/local/bin/adoptium-get-jdk-link.sh
+COPY --chmod=0755 docker-agents/adoptium-install-jdk.sh    /usr/local/bin/adoptium-install-jdk.sh
+
+# Normalize line endings in case scripts were committed with CRLF
+RUN sed -i 's/\r$//' /usr/local/bin/adoptium-get-jdk-link.sh /usr/local/bin/adoptium-install-jdk.sh
 
 ARG JAVA_VERSION=17.0.18_8
+
 # hadolint ignore=DL3018
 RUN apk add --no-cache \
-    ca-certificates \
-    jq \
-    curl \
-  && /usr/bin/local/adoptium-install-jdk.sh alpine
+      ca-certificates \
+      jq \
+      curl \
+  && /usr/local/bin/adoptium-install-jdk.sh alpine
 
 ENV PATH="/opt/jdk-${JAVA_VERSION}/bin:${PATH}"
 
-# TODO: extract this to a common script instead of ignoring SC2086
+# Create compact JRE with jlink (or copy full JDK on arm/v7 or JDK25)
 # hadolint ignore=SC2086
 RUN java_major_version="$(jlink --version 2>&1 | cut -c1-2)"; \
   if [[ "${TARGETPLATFORM}" == "linux/arm/v7" || "${java_major_version}" == 25 ]]; then \
-    # It is acceptable to have a larger image in arm/v7 (arm 32 bits) environment
-    # because jlink fails with the error "jmods: Value too large for defined data type" error.
-    # For JDK25, we need to have a proper test and validation process first cf https://github.com/jenkinsci/docker-agents/issues/1124)
-    # Noting there isn't any JMODs shipped anymore since https://adoptium.net/en-GB/news/2025/08/eclipse-temurin-jdk24-JEP493-enabled
+    # Accept larger image for arm/v7 or JDK25 (no JMODs shipped)
     cp -r "/opt/jdk-${JAVA_VERSION}" /javaruntime; \
   else \
     case "$(jlink --version 2>&1 | cut -c1-2)" in \
@@ -64,7 +74,9 @@ RUN java_major_version="$(jlink --version 2>&1 | cut -c1-2)"; \
       --output /javaruntime; \
   fi
 
-## Agent image target
+# --------------------------------
+# Stage: agent (base)
+# --------------------------------
 FROM alpine:"${ALPINE_TAG}" AS agent
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -74,6 +86,7 @@ ARG group=jenkins
 ARG uid=1000
 ARG gid=1000
 
+# Create jenkins user/group
 RUN addgroup -g "${gid}" "${group}" \
   && adduser -h /home/"${user}" -u "${uid}" -G "${group}" -D "${user}" || echo "user ${user} already exists."
 
@@ -94,13 +107,15 @@ RUN apk add --no-cache \
       procps \
       tzdata \
       tzdata-utils \
-    && rm -rf /tmp/*.apk /tmp/gcc /tmp/gcc-libs.tar* /tmp/libz /tmp/libz.tar.xz /var/cache/apk/*
+  && rm -rf /tmp/*.apk /tmp/gcc /tmp/gcc-libs.tar* /tmp/libz /tmp/libz.tar.xz /var/cache/apk/*
 
+# Jenkins remoting JAR
 ARG VERSION=3355.v388858a_47b_33
 ADD --chown="${user}":"${group}" "https://repo.jenkins-ci.org/public/org/jenkins-ci/main/remoting/${VERSION}/remoting-${VERSION}.jar" /usr/share/jenkins/agent.jar
 RUN chmod 0644 /usr/share/jenkins/agent.jar \
   && ln -sf /usr/share/jenkins/agent.jar /usr/share/jenkins/slave.jar
 
+# Git LFS
 ARG GIT_LFS_VERSION=3.7.1
 RUN arch=$(uname -m | sed -e 's/x86_64/amd64/g' -e 's/aarch64/arm64/g') \
   && curl -L -s -o git-lfs.tgz "https://github.com/git-lfs/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-${arch}-v${GIT_LFS_VERSION}.tar.gz" \
@@ -109,6 +124,7 @@ RUN arch=$(uname -m | sed -e 's/x86_64/amd64/g' -e 's/aarch64/arm64/g') \
   && git lfs install --skip-repo --system \
   && rm -rf git-lfs*
 
+# Install JRE from previous stage
 ENV JAVA_HOME=/opt/java/openjdk
 COPY --from=jre-build /javaruntime "$JAVA_HOME"
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
@@ -121,33 +137,42 @@ VOLUME /home/"${user}"/.jenkins
 VOLUME "${AGENT_WORKDIR}"
 WORKDIR /home/"${user}"
 ENV USER=${user}
-LABEL \
-    org.opencontainers.image.vendor="Jenkins project" \
-    org.opencontainers.image.title="Official Jenkins Agent Base Docker image" \
-    org.opencontainers.image.description="This is a base image, which provides the Jenkins agent executable (agent.jar)" \
-    org.opencontainers.image.version="${VERSION}" \
-    org.opencontainers.image.url="https://www.jenkins.io/" \
-    org.opencontainers.image.source="https://github.com/jenkinsci/docker-agents" \
-    org.opencontainers.image.licenses="MIT"
 
-## Inbound Agent image target
+LABEL \
+  org.opencontainers.image.vendor="Jenkins project" \
+  org.opencontainers.image.title="Official Jenkins Agent Base Docker image" \
+  org.opencontainers.image.description="This is a base image, which provides the Jenkins agent executable (agent.jar)" \
+  org.opencontainers.image.version="${VERSION}" \
+  org.opencontainers.image.url="https://www.jenkins.io/" \
+  org.opencontainers.image.source="https://github.com/jenkinsci/docker-agents" \
+  org.opencontainers.image.licenses="MIT"
+
+# --------------------------------
+# Stage: inbound-agent
+# --------------------------------
 FROM agent AS inbound-agent
 
 ARG user=jenkins
 
+# Copy entrypoint as root, set perms, then drop back to jenkins user
 USER root
-COPY ../../jenkins-agent /usr/local/bin/jenkins-agent
-RUN chmod +x /usr/local/bin/jenkins-agent &&\
-    ln -s /usr/local/bin/jenkins-agent /usr/local/bin/jenkins-slave
+
+# Use repo-root context and copy from docker-agents/ folder
+COPY --chmod=0755 docker-agents/jenkins-agent /usr/local/bin/jenkins-agent
+
+# Normalize line endings if needed
+RUN sed -i 's/\r$//' /usr/local/bin/jenkins-agent \
+  && ln -s /usr/local/bin/jenkins-agent /usr/local/bin/jenkins-slave
+
 USER ${user}
 
 LABEL \
-    org.opencontainers.image.vendor="Jenkins project" \
-    org.opencontainers.image.title="Official Jenkins Agent Base Docker image" \
-    org.opencontainers.image.description="This is an image for Jenkins agents using TCP or WebSockets to establish inbound connection to the Jenkins controller" \
-    org.opencontainers.image.version="${VERSION}" \
-    org.opencontainers.image.url="https://www.jenkins.io/" \
-    org.opencontainers.image.source="https://github.com/jenkinsci/docker-agents" \
-    org.opencontainers.image.licenses="MIT"
+  org.opencontainers.image.vendor="Jenkins project" \
+  org.opencontainers.image.title="Official Jenkins Agent Base Docker image" \
+  org.opencontainers.image.description="This is an image for Jenkins agents using TCP or WebSockets to establish inbound connection to the Jenkins controller" \
+  org.opencontainers.image.version="${VERSION}" \
+  org.opencontainers.image.url="https://www.jenkins.io/" \
+  org.opencontainers.image.source="https://github.com/jenkinsci/docker-agents" \
+  org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/usr/local/bin/jenkins-agent"]
