@@ -51,14 +51,15 @@ jobs:
           docker push ${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:${{ steps.vars.outputs.tag }}
 
       # Dispatch to Repo B (same username/account)
-      - name: Trigger Repo B to update image line
+      - name: Trigger Repo B to update images
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.PAT_GITHUB }}  # PAT with repo + workflow
+          token: ${{ secrets.PAT_GITHUB }}  # PAT with 'repo' + 'workflow' scopes
           repository: NareshD2/YamlConfigurations
           event-type: update-image
           client-payload: >-
             {
-              "controller_image": "docker.io/${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:${{ steps.vars.outputs.tag }}",
-              "controller_tag": "${{ steps.vars.outputs.tag }}"
+              "master_image": "docker.io/${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-master:${{ steps.vars.outputs.tag }}",
+              "slave_image": "docker.io/${{ secrets.DOCKER_HUB_USERNAME }}/jenkins-slave:${{ steps.vars.outputs.tag }}",
+              "tag": "${{ steps.vars.outputs.tag }}"
             }
