@@ -6,8 +6,8 @@ ARG JAVA_VERSION=17.0.18_8
 
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 
-COPY jdk-download-url.sh /usr/bin/jdk-download-url.sh
-COPY jdk-download.sh /usr/bin/jdk-download.sh
+COPY docker/jdk-download-url.sh /usr/bin/jdk-download-url.sh
+COPY docker/jdk-download.sh /usr/bin/jdk-download.sh
 
 RUN apk add --no-cache \
     ca-certificates \
@@ -46,7 +46,7 @@ ARG JENKINS_VERSION=2.549
 # Can be used to customize where jenkins.war get downloaded from
 ARG WAR_URL=https://get.jenkins.io/war/${JENKINS_VERSION}/jenkins.war
 
-COPY jenkins.io-2026.key /war/jenkins-key.pub
+COPY docker/jenkins.io-2026.key /war/jenkins-key.pub
 
 # Not using ADD as it does not check Last-Modified header
 # see https://github.com/docker/docker/issues/8331
@@ -134,9 +134,9 @@ COPY --from=jre-and-war /war/jenkins.war /usr/share/jenkins/jenkins.war
 
 USER ${user}
 
-COPY jenkins-support /usr/local/bin/jenkins-support
-COPY jenkins.sh /usr/local/bin/jenkins.sh
-COPY jenkins-plugin-cli.sh /bin/jenkins-plugin-cli
+COPY docker/jenkins-support /usr/local/bin/jenkins-support
+COPY docker/jenkins.sh /usr/local/bin/jenkins.sh
+COPY docker/jenkins-plugin-cli.sh /bin/jenkins-plugin-cli
 
 ARG JENKINS_VERSION=2.549
 
