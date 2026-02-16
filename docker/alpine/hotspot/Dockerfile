@@ -52,7 +52,7 @@ RUN java_major_version="$(jlink --version 2>&1 | cut -c1-2)"; \
 # Jenkins version being bundled in this docker image
 ENV JENKINS_VERSION=2.541.1
 # Can be used to customize where jenkins.war gets downloaded from
-ENV WAR_URL=https://get.jenkins.io/war/${JENKINS_VERSION}/jenkins.war
+ENV WAR_URL=https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
 
 # GPG public key for verifying the WAR
 COPY docker/jenkins.io-2026.key /war/jenkins-key.pub
